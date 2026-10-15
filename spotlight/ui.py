@@ -2,13 +2,29 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QEvent, QFileInfo, QPointF, QRect, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QFileInfo,
+    QParallelAnimationGroup,
+    QPoint,
+    QPointF,
+    QPropertyAnimation,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    pyqtProperty,
+    pyqtSignal,
+)
 from PyQt6.QtGui import (
     QColor,
+    QCursor,
     QFont,
     QFontMetrics,
     QGuiApplication,
@@ -25,6 +41,7 @@ from PyQt6.QtWidgets import (
     QFileIconProvider,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -35,6 +52,8 @@ from PyQt6.QtWidgets import (
 )
 
 from .winapi import force_foreground
+
+log = logging.getLogger(__name__)
 
 CARD_WIDTH = 660
 RADIUS = 18
@@ -53,7 +72,24 @@ MARGIN_BOTTOM = SHADOW_SPREAD + SHADOW_OFFSET_Y
 TOP_FRACTION = 0.2  # where the card's top edge sits, as a fraction of the screen height
 DEACTIVATION_GRACE_S = 0.2
 
+FADE_IN_MS = 140
+SLIDE_IN_MS = 180
+SLIDE_PX = 12
+FADE_OUT_MS = 100
+GROW_MS = 150
+PILL_MS = 120
+
 ENTRY_ROLE = Qt.ItemDataRole.UserRole
+
+
+class Motion:
+    """One switch for every animation: the user's setting and the Windows animation preference."""
+
+    enabled = True
+
+    @classmethod
+    def ms(cls, duration: int) -> int:
+        return duration if cls.enabled else 0
 
 
 @dataclass(frozen=True)
@@ -84,6 +120,27 @@ DARK = Theme(
     error=QColor(255, 120, 110),
     shadow_alpha=5,
 )
+
+LIGHT = Theme(
+    card=QColor(250, 250, 252, 246),
+    border=QColor(0, 0, 0, 34),
+    text=QColor(28, 28, 30),
+    muted=QColor(0, 0, 0, 125),
+    divider=QColor(0, 0, 0, 22),
+    error=QColor(200, 40, 40),
+    shadow_alpha=4,
+)
+
+
+def system_is_dark() -> bool:
+    return QGuiApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
+
+
+def resolve_theme(mode: str) -> Theme:
+    """`mode` is "system", "light" or "dark"."""
+    if mode == "dark" or (mode != "light" and system_is_dark()):
+        return DARK
+    return LIGHT
 
 
 def accent_color() -> QColor:
@@ -154,6 +211,8 @@ class IconCache:
 
 
 class ResultDelegate(QStyledItemDelegate):
+    """Paints a row's icon and text. The selection highlight is drawn by ResultList."""
+
     def __init__(self, parent: QWidget, icons: IconCache):
         super().__init__(parent)
         self._icons = icons
@@ -167,21 +226,16 @@ class ResultDelegate(QStyledItemDelegate):
     def paint(self, painter: QPainter, option, index) -> None:
         entry: Entry = index.data(ENTRY_ROLE)
         selected = bool(option.state & QStyle.StateFlag.State_Selected)
-        theme = self.theme
-        accent = accent_color()
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         row = QRectF(option.rect).adjusted(8, 2, -8, -2)
         if selected:
-            path = QPainterPath()
-            path.addRoundedRect(row, 11, 11)
-            painter.fillPath(path, accent)
-            title_color = on_accent(accent)
+            title_color = on_accent(accent_color())
             subtitle_color = QColor(title_color)
             subtitle_color.setAlpha(190)
         else:
-            title_color, subtitle_color = theme.text, theme.muted
+            title_color, subtitle_color = self.theme.text, self.theme.muted
 
         icon_rect = QRect(int(row.left()) + 12, int(row.center().y()) - 16, 32, 32)
         self._icons.icon(entry).paint(painter, icon_rect)
@@ -208,6 +262,63 @@ class ResultDelegate(QStyledItemDelegate):
             subtitle_metrics.elidedText(entry.subtitle, Qt.TextElideMode.ElideMiddle, width),
         )
         painter.restore()
+
+
+class ResultList(QListWidget):
+    """The result rows, with a selection highlight that glides from row to row."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._pill_y = 0.0
+        self._snap_next = True
+        self._glide = QPropertyAnimation(self, b"pillY", self)
+        self._glide.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self.currentRowChanged.connect(self._on_row_changed)
+
+    def get_pill_y(self) -> float:
+        return self._pill_y
+
+    def set_pill_y(self, value: float) -> None:
+        self._pill_y = value
+        self.viewport().update()
+
+    pillY = pyqtProperty(float, get_pill_y, set_pill_y)
+
+    def set_entries(self, entries: list[Entry]) -> None:
+        self._glide.stop()
+        self._snap_next = True  # a fresh list: the highlight appears in place instead of travelling
+        self.clear()
+        for entry in entries:
+            item = QListWidgetItem()
+            item.setData(ENTRY_ROLE, entry)
+            item.setSizeHint(QSize(CARD_WIDTH, ROW_HEIGHT))
+            self.addItem(item)
+        if entries:
+            self.setCurrentRow(0)
+
+    def _on_row_changed(self, row: int) -> None:
+        if row < 0:
+            return
+        target = float(row * ROW_HEIGHT)
+        self._glide.stop()
+        if self._snap_next or not self.isVisible() or not Motion.enabled:
+            self._snap_next = False
+            self.set_pill_y(target)
+            return
+        self._glide.setDuration(Motion.ms(PILL_MS))
+        self._glide.setStartValue(self._pill_y)
+        self._glide.setEndValue(target)
+        self._glide.start()
+
+    def paintEvent(self, event) -> None:
+        if self.currentRow() >= 0:
+            painter = QPainter(self.viewport())
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            path = QPainterPath()
+            path.addRoundedRect(QRectF(8, self._pill_y + 2, self.viewport().width() - 16, ROW_HEIGHT - 4), 11, 11)
+            painter.fillPath(path, accent_color())
+            painter.end()
+        super().paintEvent(event)
 
 
 class QueryEdit(QLineEdit):
@@ -275,7 +386,10 @@ class LauncherWindow(QWidget):
         self.setFixedWidth(CARD_WIDTH + 2 * MARGIN_X)
 
         self._theme = DARK
+        self._theme_mode = "system"
+        self.monitor_mode = "primary"
         self._active_once = False
+        self._hiding = False
         self._shown_at = 0.0
         self._icons = IconCache()
 
@@ -300,7 +414,7 @@ class LauncherWindow(QWidget):
 
         self.divider = Divider()
 
-        self.list = QListWidget()
+        self.list = ResultList()
         self.list.setFrameShape(QListWidget.Shape.NoFrame)
         self.list.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -323,15 +437,38 @@ class LauncherWindow(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(MARGIN_X, MARGIN_TOP, MARGIN_X, MARGIN_BOTTOM)
         layout.setSpacing(0)
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)  # the height is animated by hand
         layout.addWidget(input_row)
         layout.addWidget(self.divider)
         layout.addWidget(self.list)
         layout.addWidget(self.status)
 
+        self._grow = QPropertyAnimation(self, b"contentHeight", self)
+        self._grow.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fade_in = QPropertyAnimation(self, b"windowOpacity", self)
+        self._fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._slide_in = QPropertyAnimation(self, b"pos", self)
+        self._slide_in.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._show_group = QParallelAnimationGroup(self)
+        self._show_group.addAnimation(self._fade_in)
+        self._show_group.addAnimation(self._slide_in)
+        self._fade_out = QPropertyAnimation(self, b"windowOpacity", self)
+        self._fade_out.setEasingCurve(QEasingCurve.Type.InCubic)
+        self._fade_out.finished.connect(self._finish_hide)
+
+        QGuiApplication.styleHints().colorSchemeChanged.connect(self._on_scheme_changed)
         self.apply_theme(DARK)
         self.set_entries([])
 
-    # -- theme ---------------------------------------------------------
+    # -- configuration -------------------------------------------------
+
+    def set_theme_mode(self, mode: str) -> None:
+        self._theme_mode = mode
+        self.apply_theme(resolve_theme(mode))
+
+    def _on_scheme_changed(self, *_) -> None:
+        if self._theme_mode == "system":
+            self.apply_theme(resolve_theme("system"))
 
     def apply_theme(self, theme: Theme) -> None:
         self._theme = theme
@@ -348,6 +485,7 @@ class LauncherWindow(QWidget):
         palette.setColor(QPalette.ColorRole.PlaceholderText, theme.muted)
         self.input.setPalette(palette)
         self._style_status(error=False)
+        self.list.viewport().update()
         self.update()
 
     def _style_status(self, error: bool) -> None:
@@ -357,14 +495,7 @@ class LauncherWindow(QWidget):
     # -- content -------------------------------------------------------
 
     def set_entries(self, entries: list[Entry]) -> None:
-        self.list.clear()
-        for entry in entries:
-            item = QListWidgetItem()
-            item.setData(ENTRY_ROLE, entry)
-            item.setSizeHint(QSize(CARD_WIDTH, ROW_HEIGHT))
-            self.list.addItem(item)
-        if entries:
-            self.list.setCurrentRow(0)
+        self.list.set_entries(entries)
         self.status.hide()  # set_status() decides whether a message is shown
         self.list.setVisible(bool(entries))
         self.list.setFixedHeight(len(entries) * ROW_HEIGHT + 2 * LIST_PADDING if entries else 0)
@@ -379,7 +510,25 @@ class LauncherWindow(QWidget):
 
     def _refresh_chrome(self) -> None:
         self.divider.setVisible(self.list.count() > 0 or self.status.isVisible())
-        self.adjustSize()
+        layout = self.layout()
+        layout.activate()
+        target = layout.sizeHint().height()
+        self._grow.stop()
+        if not self.isVisible() or not Motion.enabled or self.height() == target:
+            self.resize(self.width(), target)
+            return
+        self._grow.setDuration(Motion.ms(GROW_MS))
+        self._grow.setStartValue(self.height())
+        self._grow.setEndValue(target)
+        self._grow.start()
+
+    def get_content_height(self) -> int:
+        return self.height()
+
+    def set_content_height(self, height: int) -> None:
+        self.resize(self.width(), int(height))
+
+    contentHeight = pyqtProperty(int, get_content_height, set_content_height)
 
     def current_entry(self) -> Entry | None:
         item = self.list.currentItem()
@@ -398,30 +547,77 @@ class LauncherWindow(QWidget):
 
     # -- showing / hiding ----------------------------------------------
 
+    @property
+    def is_open(self) -> bool:
+        return self.isVisible() and not self._hiding
+
     def target_screen(self):
-        return QGuiApplication.primaryScreen()
+        """The screen the bar appears on, from the "monitor" setting."""
+        screens = QGuiApplication.screens()
+        primary = QGuiApplication.primaryScreen()
+        mode = self.monitor_mode
+        if mode == "cursor":
+            return QGuiApplication.screenAt(QCursor.pos()) or primary
+        if mode.isdigit():
+            index = int(mode) - 1
+            if 0 <= index < len(screens):
+                return screens[index]
+            log.warning("Screen %s does not exist, using the primary one", mode)
+        return primary
 
     def show_launcher(self) -> None:
+        self._show_group.stop()
+        self._fade_out.stop()
+        self._hiding = False
         self._active_once = False
         self._shown_at = time.monotonic()
         self.input.clear()
         self.set_entries([])
         self.set_status("")
         area = self.target_screen().availableGeometry()
-        self.move(
+        rest = QPoint(
             area.x() + (area.width() - self.width()) // 2,
             area.y() + int(area.height() * TOP_FRACTION) - MARGIN_TOP,
         )
+        if Motion.enabled:
+            self.setWindowOpacity(0.0)
+            self.move(rest.x(), rest.y() - SLIDE_PX)
+        else:
+            self.setWindowOpacity(1.0)
+            self.move(rest)
         self.show()
         self.raise_()
         self.activateWindow()
         force_foreground(int(self.winId()))
         self.input.setFocus(Qt.FocusReason.PopupFocusReason)
+        if Motion.enabled:
+            self._fade_in.setDuration(FADE_IN_MS)
+            self._fade_in.setStartValue(0.0)
+            self._fade_in.setEndValue(1.0)
+            self._slide_in.setDuration(SLIDE_IN_MS)
+            self._slide_in.setStartValue(QPoint(rest.x(), rest.y() - SLIDE_PX))
+            self._slide_in.setEndValue(rest)
+            self._show_group.start()
 
     def hide_launcher(self) -> None:
-        if self.isVisible():
+        if not self.is_open:
+            return
+        self._hiding = True
+        self.hidden.emit()  # the controller resets right away; the window fades out meanwhile
+        self._show_group.stop()
+        if Motion.enabled:
+            self._fade_out.setDuration(FADE_OUT_MS)
+            self._fade_out.setStartValue(self.windowOpacity())
+            self._fade_out.setEndValue(0.0)
+            self._fade_out.start()
+        else:
+            self._finish_hide()
+
+    def _finish_hide(self) -> None:
+        if self._hiding:
+            self._hiding = False
             self.hide()
-            self.hidden.emit()
+            self.setWindowOpacity(1.0)
 
     def event(self, event: QEvent) -> bool:
         kind = event.type()
@@ -429,7 +625,7 @@ class LauncherWindow(QWidget):
             self._active_once = True
         elif (
             kind == QEvent.Type.WindowDeactivate
-            and self.isVisible()
+            and self.is_open
             and self._active_once
             and time.monotonic() - self._shown_at > DEACTIVATION_GRACE_S
         ):
