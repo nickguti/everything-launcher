@@ -10,7 +10,9 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
   Testato con tasti reali iniettati (hotkey, focus in primo piano, digitazione, frecce, Esc, toggle, chiusura per perdita di focus) e 23 test pytest.
 - [x] **Passo 2** – browser (Chrome + profili) e ricerca Google / prefisso `g`. Verificato aprendo una vera scheda in Chrome
   (profilo `Default`) e con test dal vivo (riga Google sempre ultima, prefisso, Invio veloce, errore del browser); 41 test pytest.
-- [ ] Passo 3 – tray, istanza unica (la nuova sostituisce la vecchia), avvio con Windows
+- [x] **Passo 3** – tray (Apri, Impostazioni, Avvia con Windows, Riavvia, Esci), istanza unica con sostituzione, avvio con Windows.
+  Verificato con processi reali (`pythonw main.py` due volte e «Riavvia»: resta una sola istanza, quella nuova); 48 test pytest.
+  «Impostazioni» per ora apre il JSON nell'editor predefinito, il pannello arriva al passo 5.
 - [ ] Passo 4 – tema chiaro/scuro di sistema, animazioni, scelta del monitor
 - [ ] Passo 5 – pannello Impostazioni + wizard di primo avvio
 - [ ] Passo 6 – doppio tocco del tasto Windows (hook WH_KEYBOARD_LL)
@@ -46,6 +48,15 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
   I motori a prefisso stanno in `browser.WEB_SEARCHES`: aggiungere `yt`, `gh`, `maps` = aggiungere una voce.
 - **Invio durante la ricerca**: se si preme Invio prima che arrivino i risultati nuovi, l'azione viene rimandata ai risultati freschi
   invece di agire sulla lista vecchia.
+- **Istanza unica**: il lucchetto è un *mutex Win32 con nome* (`Local\SpotlightLauncher-<utente>`), che sparisce da solo quando
+  il processo muore. `QLocalServer` da solo NON basta: su Windows un secondo server può mettersi in ascolto sullo stesso nome
+  (scoperto dai test). Il server locale serve solo a ricevere «chiuditi» e a comunicare il pid; se la vecchia istanza non
+  esce entro 5 s viene terminata, ma solo se il suo pid è un interprete Python. La nuova istanza acquisisce il lucchetto
+  *prima* di registrare la hotkey, così non entra in conflitto con la vecchia. «Riavvia» = lanciare un nuovo processo,
+  che sostituisce il corrente.
+- **Avvio con Windows**: valore `Spotlight` in `HKCU\...\Run` = `"pythonw.exe" "main.py"` (senza console). All'avvio il comando
+  viene riscritto se già attivo, così segue lo spostamento della cartella. Lo stato vero è il registro, non il JSON.
+- **Problemi all'avvio** (hotkey occupata, config rovinata) → notifica dalla tray (finestra di dialogo se la tray manca).
 - **Config**: JSON in `%APPDATA%\Spotlight\config.json`.
 - **Istanza unica**: la nuova istanza chiede alla vecchia di chiudersi (socket locale), poi parte; se la vecchia
   non risponde viene terminata.
