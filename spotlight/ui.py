@@ -6,8 +6,19 @@ import os
 import time
 from dataclasses import dataclass
 
-from PyQt6.QtCore import QEvent, QFileInfo, QRect, QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QIcon, QPainter, QPainterPath, QPalette, QPen
+from PyQt6.QtCore import QEvent, QFileInfo, QPointF, QRect, QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QGuiApplication,
+    QIcon,
+    QPainter,
+    QPainterPath,
+    QPalette,
+    QPen,
+    QPixmap,
+)
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -92,6 +103,27 @@ def ui_font(pixel_size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFon
     return font
 
 
+def web_icon() -> QIcon:
+    """A white globe on a blue rounded square, drawn at 2x so it stays sharp."""
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor("#2F6FEB"))
+    painter.drawRoundedRect(QRectF(0, 0, 64, 64), 15, 15)
+    pen = QPen(QColor(255, 255, 255), 3.4)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QPointF(32, 32), 18, 18)
+    painter.drawEllipse(QPointF(32, 32), 8, 18)
+    painter.drawLine(QPointF(14, 32), QPointF(50, 32))
+    painter.end()
+    pixmap.setDevicePixelRatio(2)
+    return QIcon(pixmap)
+
+
 class IconCache:
     """Shell icons, cached by extension so a result list costs a handful of lookups at most."""
 
@@ -102,14 +134,18 @@ class IconCache:
         self._cache: dict[str, QIcon] = {}
 
     def icon(self, entry: Entry) -> QIcon:
-        if entry.kind == "folder":
+        if entry.kind == "web":
+            key = "<web>"
+        elif entry.kind == "folder":
             key = "<dir>"
         else:
             ext = os.path.splitext(entry.target)[1].lower()
             key = entry.target if (not ext or ext in self._PER_FILE) else ext
         icon = self._cache.get(key)
         if icon is None:
-            if entry.kind == "folder":
+            if entry.kind == "web":
+                icon = web_icon()
+            elif entry.kind == "folder":
                 icon = self._provider.icon(QFileIconProvider.IconType.Folder)
             else:
                 icon = self._provider.icon(QFileInfo(entry.target))
@@ -222,7 +258,8 @@ class Divider(QWidget):
 
 class LauncherWindow(QWidget):
     query_changed = pyqtSignal(str)
-    entry_activated = pyqtSignal(object, bool)  # Entry, reveal-in-folder requested
+    submitted = pyqtSignal(bool)  # Enter pressed; True when Ctrl was held (reveal in folder)
+    entry_activated = pyqtSignal(object, bool)  # an entry was clicked: Entry, reveal-in-folder
     hidden = pyqtSignal()
 
     def __init__(self) -> None:
@@ -245,12 +282,12 @@ class LauncherWindow(QWidget):
         self.glyph = SearchGlyph()
         self.input = QueryEdit()
         self.input.setFont(ui_font(22))
-        self.input.setPlaceholderText("Cerca file e cartelle")
+        self.input.setPlaceholderText("Cerca file, cartelle o sul web")
         self.input.setFrame(False)
         self.input.setTextMargins(0, 0, 0, 0)
         self.input.textChanged.connect(self.query_changed)
         self.input.navigate.connect(self._move_selection)
-        self.input.submitted.connect(self._activate_current)
+        self.input.submitted.connect(self.submitted)
         self.input.cancelled.connect(self.hide_launcher)
 
         input_row = QWidget()
@@ -334,9 +371,10 @@ class LauncherWindow(QWidget):
         self._refresh_chrome()
 
     def set_status(self, text: str, error: bool = False) -> None:
+        """A message under the results; cleared whenever the entries change."""
         self._style_status(error)
         self.status.setText(text)
-        self.status.setVisible(bool(text) and self.list.count() == 0)
+        self.status.setVisible(bool(text))
         self._refresh_chrome()
 
     def _refresh_chrome(self) -> None:
@@ -353,11 +391,6 @@ class LauncherWindow(QWidget):
         count = self.list.count()
         if count:
             self.list.setCurrentRow((self.list.currentRow() + delta) % count)
-
-    def _activate_current(self, reveal: bool) -> None:
-        entry = self.current_entry()
-        if entry is not None:
-            self.entry_activated.emit(entry, reveal)
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         reveal = bool(QApplication.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier)

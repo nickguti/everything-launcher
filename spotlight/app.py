@@ -11,6 +11,7 @@ import sys
 from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
+from . import browser
 from .config import Config, config_dir
 from .hotkey import HotkeyError, HotkeyManager
 from .search import EverythingSearch, SearchRequest, SearchResult, SearchWorker
@@ -71,11 +72,11 @@ class Launcher(QObject):
         self.worker.results_ready.connect(self._on_results)
         self.worker.failed.connect(self._on_failed)
         self.worker.engine_status.connect(self._on_engine_status)
-        self._engine_status = ""
 
         self.window = LauncherWindow()
         self.window.query_changed.connect(self._on_query_changed)
-        self.window.entry_activated.connect(self._on_entry_activated)
+        self.window.submitted.connect(self._on_submitted)
+        self.window.entry_activated.connect(self._activate)
         self.window.hidden.connect(self._on_hidden)
 
         self._debounce = QTimer(self)
@@ -83,6 +84,9 @@ class Launcher(QObject):
         self._debounce.timeout.connect(self._run_search)
         self._text = ""
         self._request_id = 0
+        self._engine_status = ""
+        self._searching = False  # a file search is pending or in flight for the current text
+        self._deferred_reveal: bool | None = None  # Enter pressed while searching
 
         self.worker.start()
 
@@ -100,24 +104,46 @@ class Launcher(QObject):
 
     # -- search --------------------------------------------------------
 
+    def _web_entry(self, query: str, search: browser.WebSearch | None = None) -> Entry:
+        search = search or browser.DEFAULT_WEB_SEARCH
+        where = browser.display_name(self.config.browser, self.config.browser_path)
+        return Entry(
+            kind="web",
+            title=f"Cerca su {search.name}: {query}",
+            subtitle=f"Apri in {where}",
+            target=browser.search_url(search, query),
+        )
+
     def _on_query_changed(self, text: str) -> None:
         self._text = text.strip()
         self._request_id += 1  # anything still in flight is now stale
+        self._searching = False
+        self._deferred_reveal = None
         if not self._text:
             self._debounce.stop()
             self.window.set_entries([])
-            self.window.set_status("")
             return
+        search, query = browser.split_prefix(self._text)
+        if search is not None:  # "g cats": web search only, no file search
+            self._debounce.stop()
+            self.window.set_entries([self._web_entry(query, search)])
+            return
+        self._searching = True
         self._debounce.start(self.config.debounce_ms)
 
     def _on_engine_status(self, message: str) -> None:
         self._engine_status = message
-        if message and self.window.isVisible() and self._text and self.window.list.count() == 0:
-            self.window.set_status(message)
+        if message and self._searching:
+            self._show_engine_status()
+
+    def _show_engine_status(self) -> None:
+        # Everything is still starting: offer the web search meanwhile instead of a dead bar.
+        self.window.set_entries([self._web_entry(self._text)])
+        self.window.set_status(self._engine_status)
 
     def _run_search(self) -> None:
         if self._engine_status:
-            self.window.set_status(self._engine_status)
+            self._show_engine_status()
         self.worker.submit(
             SearchRequest(
                 id=self._request_id,
@@ -132,27 +158,57 @@ class Launcher(QObject):
     def _on_results(self, request_id: int, results: list[SearchResult]) -> None:
         if request_id != self._request_id:
             return
-        self.window.set_entries([to_entry(r) for r in results])
-        self.window.set_status("" if results else "Nessun risultato")
+        # The web search is always the last row, however many files matched.
+        self.window.set_entries([*(to_entry(r) for r in results), self._web_entry(self._text)])
+        self._finish_search()
 
     def _on_failed(self, request_id: int, message: str) -> None:
         if request_id != self._request_id:
             return
-        self.window.set_entries([])
+        self.window.set_entries([self._web_entry(self._text)])
         self.window.set_status(message, error=True)
+        self._finish_search()
+
+    def _finish_search(self) -> None:
+        self._searching = False
+        reveal, self._deferred_reveal = self._deferred_reveal, None
+        entry = self.window.current_entry()
+        if reveal is not None and entry is not None:
+            self._activate(entry, reveal)
 
     def _on_hidden(self) -> None:
         self._debounce.stop()
         self._request_id += 1
+        self._searching = False
+        self._deferred_reveal = None
 
     # -- actions -------------------------------------------------------
 
-    def _on_entry_activated(self, entry: Entry, reveal: bool) -> None:
+    def _on_submitted(self, reveal: bool) -> None:
+        if self._searching and not self._engine_status:
+            # Typed fast and hit Enter: act on the fresh results, not on the stale list.
+            self._deferred_reveal = reveal
+            return
+        entry = self.window.current_entry()
+        if entry is not None:
+            self._activate(entry, reveal)
+
+    def _activate(self, entry: Entry, reveal: bool) -> None:
         try:
-            if reveal:
+            if entry.kind == "web":
+                browser.open_url(
+                    entry.target,
+                    browser=self.config.browser,
+                    path=self.config.browser_path,
+                    profile=self.config.browser_profile,
+                )
+            elif reveal:
                 reveal_in_explorer(entry.target)
             else:
                 open_path(entry.target)
+        except browser.BrowserError as exc:
+            log.error("%s", exc)
+            self.window.set_status(str(exc), error=True)
         except FileNotFoundError:
             self.window.set_status("Il file non esiste più (l'indice di Everything non è aggiornato).", error=True)
         except OSError as exc:
