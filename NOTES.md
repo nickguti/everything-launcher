@@ -17,7 +17,11 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
   animazioni verificate campionando opacità/posizione/altezza nel tempo. Monitor verificato solo con test unitari (qui c'è 1 solo schermo).
 - [x] **Passo 5** – pannello Impostazioni (5 schede) + wizard di primo avvio (4 passi), entrambi costruiti dalle stesse sezioni.
   77 test pytest + test dal vivo con tasti reali (26 controlli: wizard, cattura scorciatoia, conflitto, salvataggio).
-- [ ] Passo 6 – doppio tocco del tasto Windows (hook WH_KEYBOARD_LL)
+- [x] **Passo 6** – doppio tocco del tasto Windows (hook WH_KEYBOARD_LL), configurabile nel pannello (attivazione + intervallo 150–600 ms).
+  97 test pytest: macchina a stati con orologio finto (tocco singolo, doppio, Win+tasto, pressione lunga, auto-repeat, digitazione
+  dopo il tocco, Win sinistro/destro), struct di SendInput, installazione/rimozione dell'hook reale.
+  **Non verificato con tasti reali**: il test dal vivo (`live_test4`, che inietta tocchi di Win) è stato interrotto dall'utente.
+  Verificato a mano soltanto che `Win → 0xFF → rilascio Win` non apre Start su questa macchina (apre `SearchHost.exe` solo senza maschera).
 - [ ] Passo 7 – test pytest, README, pubblicazione su GitHub con release
 
 ## Decisioni
@@ -76,6 +80,13 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
 - **Cattura della scorciatoia**: `HotkeyEdit` registra la prossima combinazione e, finché ha il focus, sospende la hotkey globale
   (altrimenti Alt+Space aprirebbe il launcher invece di essere registrata). Funziona anche con Alt+Space; le combinazioni con il
   tasto Windows non si possono catturare (le intercetta il sistema), ma si può comunque scriverle a mano nel JSON.
+- **Doppio tocco di Win** (`winhook.py`): `TapDetector` è una macchina a stati pura; `WinKeyHook` la esegue in un thread dedicato con il
+  suo message loop (la tastiera non dipende dalla UI) e notifica la UI con un segnale Qt. Un tocco singolo viene «mascherato»:
+  il rilascio di Win è bloccato e rimandato dopo un tasto fittizio VK 0xFF, così Windows lo vede come combinazione e non apre Start;
+  se il secondo tocco non arriva entro l'intervallo si invia un tocco normale (Start si apre in ritardo). Win+altro tasto non si tocca.
+  Una pressione > 0,5 s non è un tocco. Se si digita subito dopo un tocco, il tocco viene restituito *prima* del tasto.
+  Gli eventi iniettati da altri programmi (tastiera su schermo, desktop remoto) contano come input dell'utente: si ignorano solo
+  quelli iniettati da noi, riconosciuti da `dwExtraInfo`. Limite: sopra finestre avviate come amministratore l'hook non vede i tasti (UIPI).
 - **Config**: JSON in `%APPDATA%\Spotlight\config.json`.
 - **Istanza unica**: la nuova istanza chiede alla vecchia di chiudersi (socket locale), poi parte; se la vecchia
   non risponde viene terminata.
