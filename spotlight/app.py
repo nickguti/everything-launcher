@@ -19,6 +19,7 @@ from .search import EverythingSearch, SearchRequest, SearchResult, SearchWorker
 from .settings import SettingsDialog, SetupWizard
 from .tray import Tray, app_icon
 from .ui import Entry, LauncherWindow, Motion
+from .winhook import WinKeyHook
 from .winapi import animations_enabled, force_foreground
 
 log = logging.getLogger("spotlight")
@@ -251,6 +252,8 @@ class App(QObject):
         self.launcher = Launcher(config)
         self.hotkey = HotkeyManager(qapp)
         self.hotkey.activated.connect(self.launcher.toggle)
+        self.win_hook = WinKeyHook(config.double_tap_ms, parent=self)
+        self.win_hook.double_tapped.connect(self.launcher.toggle)
         self.tray = Tray(autostart.is_enabled(), parent=self) if Tray.available() else None
         self._settings: SettingsDialog | None = None
         self._wizard: SetupWizard | None = None
@@ -269,6 +272,9 @@ class App(QObject):
         error = self._register_hotkey()
         if error:
             problems.append(f"{error} Puoi comunque aprire Spotlight dall'icona nella tray.")
+        error = self._apply_double_tap()
+        if error:
+            problems.append(error)
         for problem in problems:
             QTimer.singleShot(500, lambda message=problem: self.report(message))
         if not self.config.setup_done:
@@ -277,6 +283,7 @@ class App(QObject):
             QTimer.singleShot(0, self.launcher.show)
 
     def shutdown(self) -> None:
+        self.win_hook.stop()
         self.hotkey.unregister()
         if self.tray is not None:
             self.tray.hide()
@@ -303,6 +310,14 @@ class App(QObject):
         except HotkeyError as exc:
             return str(exc)
         return ""
+
+    def _apply_double_tap(self) -> str:
+        """Start, stop or retune the Windows-key hook. Returns an error message, or ""."""
+        if not self.config.double_tap_win:
+            self.win_hook.stop()
+            return ""
+        self.win_hook.window_ms = self.config.double_tap_ms
+        return self.win_hook.start()
 
     def _on_capture(self, active: bool) -> None:
         # While a settings field records key presses the global hotkey must not fire.
@@ -351,6 +366,9 @@ class App(QObject):
                 self.config.hotkey, self.config.hotkey_enabled = old_hotkey
                 self._register_hotkey()
         self.launcher.apply_config()
+        error = self._apply_double_tap()
+        if error:
+            problems.append(error)
         try:
             self.config.save()
         except OSError as exc:

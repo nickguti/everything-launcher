@@ -84,7 +84,8 @@ def test_hotkey_edit_reports_focus_for_capture(qapp):
 
 def test_sections_roundtrip_every_setting(qapp):
     original = Config(
-        hotkey="Ctrl+Space", hotkey_enabled=False, theme="dark", monitor="cursor", animations=False,
+        hotkey="Ctrl+Space", hotkey_enabled=False, double_tap_win=False, double_tap_ms=450,
+        theme="dark", monitor="cursor", animations=False,
         sort="name_asc", result_filter="files", max_results=5, excluded_paths=["\\a\\", "\\b\\"],
         browser="chrome", browser_profile="Profile 1", everything_path="", debounce_ms=120,
     )  # fmt: skip
@@ -92,7 +93,7 @@ def test_sections_roundtrip_every_setting(qapp):
     for section in (ActivationSection(), AppearanceSection(), SearchSection(), BrowserSection(), settings.AdvancedSection()):
         section.load(original)
         section.apply(result)
-    for name in ("hotkey", "hotkey_enabled", "theme", "monitor", "animations", "sort", "result_filter",
+    for name in ("hotkey", "hotkey_enabled", "double_tap_win", "double_tap_ms", "theme", "monitor", "animations", "sort", "result_filter",
                  "max_results", "excluded_paths", "browser", "browser_profile", "debounce_ms"):  # fmt: skip
         assert getattr(result, name) == getattr(original, name), name
 
@@ -205,3 +206,15 @@ def test_wizard_stops_at_a_step_with_a_problem(qapp, fake_browsers):
     wizard.activation.hotkey_edit.set_spec("")
     wizard.next_button.click()
     assert wizard.step_label.text() == "Passo 1 di 4" and fake_browsers
+
+
+def test_double_tap_controls_follow_their_checkbox_and_warn_when_nothing_is_on(qapp):
+    section = ActivationSection()
+    section.load(Config(double_tap_win=True, hotkey_enabled=True))
+    assert section.double_tap_spin.isEnabled() and section.warning.text() == ""
+    section.double_tap_check.setChecked(False)
+    assert not section.double_tap_spin.isEnabled() and section.warning.text() == ""
+    section.hotkey_check.setChecked(False)
+    assert "tray" in section.warning.text()
+    section.double_tap_check.setChecked(True)
+    assert section.warning.text() == ""

@@ -109,6 +109,8 @@ _VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "monitor": _monitor,
     "animations": _boolean,
     "hotkey_enabled": _boolean,
+    "double_tap_win": _boolean,
+    "double_tap_ms": _int_between(150, 600),
     "setup_done": _boolean,
 }
 
@@ -117,6 +119,8 @@ _VALIDATORS: dict[str, Callable[[Any], Any]] = {
 class Config:
     hotkey: str = "Alt+Space"
     hotkey_enabled: bool = True
+    double_tap_win: bool = True  # double tap of the Windows key (see winhook.py)
+    double_tap_ms: int = 300  # longest pause between the two taps
     setup_done: bool = False  # the first-run wizard has been completed or skipped
     max_results: int = 8
     debounce_ms: int = 80

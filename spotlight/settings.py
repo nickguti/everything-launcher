@@ -192,6 +192,15 @@ class ActivationSection(Section):
 
     def __init__(self, autostart_enabled: bool = False):
         super().__init__()
+        self.double_tap_check = QCheckBox("Apri con il doppio tocco del tasto Windows")
+        self.double_tap_spin = QSpinBox()
+        self.double_tap_spin.setRange(150, 600)
+        self.double_tap_spin.setSingleStep(25)
+        self.double_tap_spin.setSuffix(" ms")
+        self.double_tap_note = _hint(
+            "Un tocco singolo apre il menu Start come sempre, ma con un breve ritardo pari all'intervallo. "
+            "Non funziona sopra le finestre avviate come amministratore."
+        )
         self.hotkey_check = QCheckBox("Apri con una scorciatoia da tastiera")
         self.hotkey_edit = HotkeyEdit()
         self.reset_button = QPushButton(f"Reimposta ({DEFAULT_HOTKEY})")
@@ -203,22 +212,35 @@ class ActivationSection(Section):
         hotkey_row.addWidget(self.hotkey_edit, 1)
         hotkey_row.addWidget(self.reset_button)
 
+        self.warning = QLabel()
+        self.warning.setWordWrap(True)
+        self.warning.setStyleSheet("color: #d13438;")
+
         form = _form(self)
+        form.addRow(self.double_tap_check)
+        form.addRow("Intervallo tra i due tocchi", self.double_tap_spin)
+        form.addRow(self.double_tap_note)
         form.addRow(self.hotkey_check)
         form.addRow("Scorciatoia", hotkey_row)
         form.addRow(self.note)
+        form.addRow(self.warning)
         form.addRow(self.autostart_check)
 
         self.hotkey_check.toggled.connect(self._sync_enabled)
+        self.double_tap_check.toggled.connect(self._sync_enabled)
         self.hotkey_edit.capture_started.connect(lambda: self.capture.emit(True))
         self.hotkey_edit.capture_ended.connect(lambda: self.capture.emit(False))
         self.hotkey_edit.spec_changed.connect(lambda spec: self.note.setText(f"Scorciatoia impostata su {spec}."))
         self.hotkey_edit.rejected.connect(self.note.setText)
         self.reset_button.clicked.connect(lambda: self.hotkey_edit.set_spec(DEFAULT_HOTKEY))
 
-    def _sync_enabled(self, enabled: bool) -> None:
-        self.hotkey_edit.setEnabled(enabled)
-        self.reset_button.setEnabled(enabled)
+    def _sync_enabled(self, *_) -> None:
+        hotkey_on = self.hotkey_check.isChecked()
+        self.hotkey_edit.setEnabled(hotkey_on)
+        self.reset_button.setEnabled(hotkey_on)
+        self.double_tap_spin.setEnabled(self.double_tap_check.isChecked())
+        none_on = not hotkey_on and not self.double_tap_check.isChecked()
+        self.warning.setText("Nessun metodo attivo: potrai aprire Spotlight solo dall'icona nella tray." if none_on else "")
 
     @property
     def autostart(self) -> bool:
@@ -227,12 +249,16 @@ class ActivationSection(Section):
     def load(self, config: Config) -> None:
         self.hotkey_edit.set_spec(config.hotkey)
         self.hotkey_check.setChecked(config.hotkey_enabled)
-        self._sync_enabled(config.hotkey_enabled)
+        self.double_tap_check.setChecked(config.double_tap_win)
+        self.double_tap_spin.setValue(config.double_tap_ms)
+        self._sync_enabled()
         self.note.setText("Se la combinazione è già usata da un altro programma te lo diremo al salvataggio.")
 
     def apply(self, config: Config) -> None:
         config.hotkey = self.hotkey_edit.spec() or DEFAULT_HOTKEY
         config.hotkey_enabled = self.hotkey_check.isChecked()
+        config.double_tap_win = self.double_tap_check.isChecked()
+        config.double_tap_ms = self.double_tap_spin.value()
 
     def problem(self) -> str:
         if self.hotkey_check.isChecked() and not self.hotkey_edit.spec():

@@ -98,3 +98,13 @@ def test_update_from_copies_settings_and_not_the_load_warning():
 def test_wizard_and_hotkey_flags_default_sensibly():
     cfg = Config()
     assert cfg.hotkey_enabled is True and cfg.setup_done is False
+
+
+def test_double_tap_defaults_and_validation(tmp_path):
+    cfg = Config()
+    assert cfg.double_tap_win is True and cfg.double_tap_ms == 300
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"double_tap_ms": 10, "double_tap_win": "yes"}), encoding="utf-8")
+    loaded = Config.load(path)
+    assert loaded.double_tap_ms == 150 and loaded.double_tap_win is True  # clamped / rejected
+    assert "double_tap_win" in loaded.load_warning
