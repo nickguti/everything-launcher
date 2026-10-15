@@ -108,12 +108,16 @@ _VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "theme": _one_of(THEME_CHOICES),
     "monitor": _monitor,
     "animations": _boolean,
+    "hotkey_enabled": _boolean,
+    "setup_done": _boolean,
 }
 
 
 @dataclass
 class Config:
     hotkey: str = "Alt+Space"
+    hotkey_enabled: bool = True
+    setup_done: bool = False  # the first-run wizard has been completed or skipped
     max_results: int = 8
     debounce_ms: int = 80
     sort: str = "date_modified_desc"
@@ -132,6 +136,13 @@ class Config:
 
     def to_dict(self) -> dict[str, Any]:
         return {f.name: getattr(self, f.name) for f in fields(self) if f.metadata.get("persist", True)}
+
+    def update_from(self, other: Config) -> None:
+        """Copy every persisted setting from `other`, so shared references see the change."""
+        for f in fields(self):
+            if f.metadata.get("persist", True):
+                value = getattr(other, f.name)
+                setattr(self, f.name, list(value) if isinstance(value, list) else value)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Config:

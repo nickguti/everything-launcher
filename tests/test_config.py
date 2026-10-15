@@ -84,3 +84,17 @@ def test_theme_and_animations_are_validated(tmp_path):
     cfg = Config.load(path)
     assert (cfg.theme, cfg.animations) == ("system", True)
     assert "theme" in cfg.load_warning and "animations" in cfg.load_warning
+
+
+def test_update_from_copies_settings_and_not_the_load_warning():
+    target, source = Config(), Config(hotkey="Ctrl+Space", excluded_paths=["/x/"])
+    source.load_warning = "careful"
+    target.update_from(source)
+    assert target.hotkey == "Ctrl+Space" and target.excluded_paths == ["/x/"]
+    assert target.excluded_paths is not source.excluded_paths  # no shared list
+    assert target.load_warning == ""
+
+
+def test_wizard_and_hotkey_flags_default_sensibly():
+    cfg = Config()
+    assert cfg.hotkey_enabled is True and cfg.setup_done is False

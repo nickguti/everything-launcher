@@ -98,12 +98,15 @@ class HotkeyManager(QObject):
         self._app = app
         self._filter = _HotkeyFilter(self._on_hotkey)
         self._registered = False
+        self._spec = ""
+        self._suspended = False
         app.installNativeEventFilter(self._filter)
 
     def register(self, spec: str) -> None:
         """Register `spec`, replacing the previous hotkey. Raises HotkeyError on failure."""
         modifiers, key = parse_hotkey(spec)
         self.unregister()
+        self._spec = spec
         if not user32.RegisterHotKey(None, _HOTKEY_ID, modifiers | MOD_NOREPEAT, key):
             error = ctypes.get_last_error()
             if error == ERROR_HOTKEY_ALREADY_REGISTERED:
@@ -116,6 +119,20 @@ class HotkeyManager(QObject):
         if self._registered:
             user32.UnregisterHotKey(None, _HOTKEY_ID)
             self._registered = False
+
+    def suspend(self) -> None:
+        """Release the hotkey while a settings field is capturing key presses."""
+        if self._registered:
+            self.unregister()
+            self._suspended = True
+
+    def resume(self) -> None:
+        if self._suspended:
+            self._suspended = False
+            try:
+                self.register(self._spec)
+            except HotkeyError:
+                log.exception("Cannot restore the hotkey after capture")
 
     def _on_hotkey(self) -> None:
         # Defer to the event loop: the filter runs inside the native message dispatch.

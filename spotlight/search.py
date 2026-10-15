@@ -202,7 +202,7 @@ class EverythingSearch:
         on_status: Callable[[str], None] | None = None,
     ):
         self._vendor = vendor_dir
-        self._everything_path = everything_path
+        self.everything_path = everything_path  # may change when settings do
         self.on_status = on_status  # called with a message while Everything starts, "" when done
         self._client: _SdkClient | _EsClient | None = None
         self._lock = threading.Lock()
@@ -252,7 +252,7 @@ class EverythingSearch:
 
     def _start_everything(self) -> bool:
         """Launch Everything hidden. Returns False if one was launched too recently to retry."""
-        exe = find_everything_exe(self._everything_path)
+        exe = find_everything_exe(self.everything_path)
         if exe is None:
             raise EverythingNotInstalled("Everything non è installato. Scaricalo da voidtools.com.")
         now = time.monotonic()
