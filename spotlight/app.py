@@ -9,16 +9,17 @@ import subprocess
 import sys
 
 from PyQt6.QtCore import QObject, QTimer
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtWidgets import QApplication, QMessageBox, QWidget
 
 from . import autostart, browser
-from .config import Config, config_dir, config_path
+from .config import Config, config_dir
 from .hotkey import HotkeyError, HotkeyManager
 from .instance import SingleInstance
 from .search import EverythingSearch, SearchRequest, SearchResult, SearchWorker
+from .settings import SettingsDialog, SetupWizard
 from .tray import Tray, app_icon
 from .ui import Entry, LauncherWindow, Motion
-from .winapi import animations_enabled
+from .winapi import animations_enabled, force_foreground
 
 log = logging.getLogger("spotlight")
 
@@ -105,6 +106,7 @@ class Launcher(QObject):
         Motion.enabled = self.config.animations and animations_enabled()
         self.window.monitor_mode = self.config.monitor
         self.window.set_theme_mode(self.config.theme)
+        self.engine.everything_path = self.config.everything_path
 
     def toggle(self) -> None:
         if self.window.is_open:
@@ -240,6 +242,139 @@ def restart() -> None:
     )
 
 
+class App(QObject):
+    """Everything that lives for the whole session: launcher, hotkey, tray and the settings windows."""
+
+    def __init__(self, qapp: QApplication, config: Config):
+        super().__init__(qapp)
+        self.config = config
+        self.launcher = Launcher(config)
+        self.hotkey = HotkeyManager(qapp)
+        self.hotkey.activated.connect(self.launcher.toggle)
+        self.tray = Tray(autostart.is_enabled(), parent=self) if Tray.available() else None
+        self._settings: SettingsDialog | None = None
+        self._wizard: SetupWizard | None = None
+
+        if self.tray is not None:
+            self.tray.open_requested.connect(self.launcher.show)
+            self.tray.settings_requested.connect(self.open_settings)
+            self.tray.autostart_toggled.connect(self.set_autostart)
+            self.tray.restart_requested.connect(self.restart)
+            self.tray.quit_requested.connect(qapp.quit)
+
+    def start(self, show_now: bool = False) -> None:
+        if self.tray is not None:
+            self.tray.show()
+        problems = [self.config.load_warning] if self.config.load_warning else []
+        error = self._register_hotkey()
+        if error:
+            problems.append(f"{error} Puoi comunque aprire Spotlight dall'icona nella tray.")
+        for problem in problems:
+            QTimer.singleShot(500, lambda message=problem: self.report(message))
+        if not self.config.setup_done:
+            QTimer.singleShot(400, self.open_wizard)
+        if show_now:
+            QTimer.singleShot(0, self.launcher.show)
+
+    def shutdown(self) -> None:
+        self.hotkey.unregister()
+        if self.tray is not None:
+            self.tray.hide()
+        self.launcher.shutdown()
+
+    # -- messages ------------------------------------------------------
+
+    def report(self, message: str, error: bool = True) -> None:
+        log.log(logging.ERROR if error else logging.INFO, "%s", message)
+        if self.tray is not None:
+            self.tray.notify(message, error)
+        else:
+            QMessageBox.warning(None, "Spotlight", message)
+
+    # -- hotkey --------------------------------------------------------
+
+    def _register_hotkey(self) -> str:
+        """Apply the hotkey settings. Returns an error message, or "" if all went well."""
+        if not self.config.hotkey_enabled:
+            self.hotkey.unregister()
+            return ""
+        try:
+            self.hotkey.register(self.config.hotkey)
+        except HotkeyError as exc:
+            return str(exc)
+        return ""
+
+    def _on_capture(self, active: bool) -> None:
+        # While a settings field records key presses the global hotkey must not fire.
+        if active:
+            self.hotkey.suspend()
+        else:
+            self.hotkey.resume()
+
+    # -- settings windows ----------------------------------------------
+
+    def _present(self, window: QWidget) -> None:
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        force_foreground(int(window.winId()))
+
+    def open_settings(self) -> None:
+        if self._settings is not None and self._settings.isVisible():
+            self._present(self._settings)
+            return
+        dialog = SettingsDialog(self.config, autostart.is_enabled())
+        dialog.capture.connect(self._on_capture)
+        dialog.saved.connect(self.apply_settings)
+        self._settings = dialog
+        self._present(dialog)
+
+    def open_wizard(self) -> None:
+        if self._wizard is not None and self._wizard.isVisible():
+            self._present(self._wizard)
+            return
+        wizard = SetupWizard(self.config, autostart.is_enabled())
+        wizard.capture.connect(self._on_capture)
+        wizard.completed.connect(self.apply_settings)
+        self._wizard = wizard
+        self._present(wizard)
+
+    def apply_settings(self, new: Config, autostart_enabled: bool | None = None) -> None:
+        """Take over a config edited in a dialog: apply it live and save it."""
+        old_hotkey = (self.config.hotkey, self.config.hotkey_enabled)
+        self.config.update_from(new)
+        problems: list[str] = []
+        if (self.config.hotkey, self.config.hotkey_enabled) != old_hotkey:
+            error = self._register_hotkey()
+            if error:
+                problems.append(f"{error} Ho rimesso la scorciatoia precedente ({old_hotkey[0]}).")
+                self.config.hotkey, self.config.hotkey_enabled = old_hotkey
+                self._register_hotkey()
+        self.launcher.apply_config()
+        try:
+            self.config.save()
+        except OSError as exc:
+            problems.append(f"Impossibile salvare la configurazione: {exc.strerror or exc}")
+        if autostart_enabled is not None:
+            self.set_autostart(autostart_enabled)
+        for problem in problems:
+            self.report(problem)
+
+    def set_autostart(self, enabled: bool) -> None:
+        try:
+            autostart.set_enabled(enabled)
+        except OSError as exc:
+            self.report(f"Impossibile modificare l'avvio con Windows: {exc.strerror or exc}")
+        if self.tray is not None:
+            self.tray.set_autostart_checked(autostart.is_enabled())
+
+    def restart(self) -> None:
+        try:
+            restart()
+        except OSError as exc:
+            self.report(f"Impossibile riavviare Spotlight: {exc.strerror or exc}")
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     setup_logging()
@@ -257,62 +392,9 @@ def main(argv: list[str] | None = None) -> int:
 
     config = Config.load()
     autostart.refresh()
-    launcher = Launcher(config)
-    tray = Tray(autostart.is_enabled(), parent=app) if Tray.available() else None
-
-    def report(message: str, error: bool = True) -> None:
-        log.log(logging.ERROR if error else logging.INFO, "%s", message)
-        if tray is not None:
-            tray.notify(message, error)
-        else:
-            QMessageBox.warning(None, "Spotlight", message)
-
-    def open_settings() -> None:
-        # Placeholder until the settings panel exists: open the JSON in the default editor.
-        try:
-            open_path(str(config_path()))
-        except OSError as exc:
-            report(f"Impossibile aprire la configurazione ({config_path()}): {exc.strerror or exc}")
-
-    def toggle_autostart(enabled: bool) -> None:
-        try:
-            autostart.set_enabled(enabled)
-        except OSError as exc:
-            report(f"Impossibile modificare l'avvio con Windows: {exc.strerror or exc}")
-        if tray is not None:
-            tray.set_autostart_checked(autostart.is_enabled())
-
-    def do_restart() -> None:
-        try:
-            restart()
-        except OSError as exc:
-            report(f"Impossibile riavviare Spotlight: {exc.strerror or exc}")
-
-    if tray is not None:
-        tray.open_requested.connect(launcher.show)
-        tray.settings_requested.connect(open_settings)
-        tray.autostart_toggled.connect(toggle_autostart)
-        tray.restart_requested.connect(do_restart)
-        tray.quit_requested.connect(app.quit)
-        tray.show()
-
-    hotkey = HotkeyManager(app)
-    hotkey.activated.connect(launcher.toggle)
-    problems = [config.load_warning] if config.load_warning else []
-    try:
-        hotkey.register(config.hotkey)
-    except HotkeyError as exc:
-        problems.append(f"{exc} Puoi comunque aprire Spotlight dall'icona nella tray.")
-    for problem in problems:
-        QTimer.singleShot(500, lambda message=problem: report(message))
-
-    if "--show" in argv:
-        QTimer.singleShot(0, launcher.show)
-
+    application = App(app, config)
+    application.start(show_now="--show" in argv)
     try:
         return app.exec()
     finally:
-        hotkey.unregister()
-        if tray is not None:
-            tray.hide()
-        launcher.shutdown()
+        application.shutdown()
