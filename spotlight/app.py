@@ -11,13 +11,18 @@ import sys
 from PyQt6.QtCore import QObject, QTimer
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
-from . import browser
-from .config import Config, config_dir
+from . import autostart, browser
+from .config import Config, config_dir, config_path
 from .hotkey import HotkeyError, HotkeyManager
+from .instance import SingleInstance
 from .search import EverythingSearch, SearchRequest, SearchResult, SearchWorker
+from .tray import Tray, app_icon
 from .ui import Entry, LauncherWindow
 
 log = logging.getLogger("spotlight")
+
+_DETACHED_PROCESS = 0x00000008
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 
 def setup_logging() -> None:
@@ -218,26 +223,80 @@ class Launcher(QObject):
             self.window.hide_launcher()
 
 
+def restart() -> None:
+    """Start a fresh instance; it replaces this one (see instance.SingleInstance)."""
+    subprocess.Popen(
+        autostart.launch_command(),
+        close_fds=True,
+        creationflags=_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     setup_logging()
     app = QApplication(sys.argv)
     app.setApplicationName("Spotlight")
     app.setQuitOnLastWindowClosed(False)
+    app.setWindowIcon(app_icon())
+
+    # Take over from a running instance before touching the hotkey it still holds.
+    instance = SingleInstance(parent=app)
+    if not instance.acquire():
+        QMessageBox.critical(None, "Spotlight", "Un'altra istanza di Spotlight è in esecuzione e non si chiude.")
+        return 1
+    instance.quit_requested.connect(app.quit)
 
     config = Config.load()
+    autostart.refresh()
     launcher = Launcher(config)
+    tray = Tray(autostart.is_enabled(), parent=app) if Tray.available() else None
+
+    def report(message: str, error: bool = True) -> None:
+        log.log(logging.ERROR if error else logging.INFO, "%s", message)
+        if tray is not None:
+            tray.notify(message, error)
+        else:
+            QMessageBox.warning(None, "Spotlight", message)
+
+    def open_settings() -> None:
+        # Placeholder until the settings panel exists: open the JSON in the default editor.
+        try:
+            open_path(str(config_path()))
+        except OSError as exc:
+            report(f"Impossibile aprire la configurazione ({config_path()}): {exc.strerror or exc}")
+
+    def toggle_autostart(enabled: bool) -> None:
+        try:
+            autostart.set_enabled(enabled)
+        except OSError as exc:
+            report(f"Impossibile modificare l'avvio con Windows: {exc.strerror or exc}")
+        if tray is not None:
+            tray.set_autostart_checked(autostart.is_enabled())
+
+    def do_restart() -> None:
+        try:
+            restart()
+        except OSError as exc:
+            report(f"Impossibile riavviare Spotlight: {exc.strerror or exc}")
+
+    if tray is not None:
+        tray.open_requested.connect(launcher.show)
+        tray.settings_requested.connect(open_settings)
+        tray.autostart_toggled.connect(toggle_autostart)
+        tray.restart_requested.connect(do_restart)
+        tray.quit_requested.connect(app.quit)
+        tray.show()
+
     hotkey = HotkeyManager(app)
     hotkey.activated.connect(launcher.toggle)
-
     problems = [config.load_warning] if config.load_warning else []
     try:
         hotkey.register(config.hotkey)
     except HotkeyError as exc:
-        log.error("%s", exc)
-        problems.append(str(exc))
-    if problems:
-        QTimer.singleShot(0, lambda: QMessageBox.warning(None, "Spotlight", "\n\n".join(problems)))
+        problems.append(f"{exc} Puoi comunque aprire Spotlight dall'icona nella tray.")
+    for problem in problems:
+        QTimer.singleShot(500, lambda message=problem: report(message))
 
     if "--show" in argv:
         QTimer.singleShot(0, launcher.show)
@@ -246,4 +305,6 @@ def main(argv: list[str] | None = None) -> int:
         return app.exec()
     finally:
         hotkey.unregister()
+        if tray is not None:
+            tray.hide()
         launcher.shutdown()
