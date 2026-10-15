@@ -15,7 +15,8 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
   «Impostazioni» per ora apre il JSON nell'editor predefinito, il pannello arriva al passo 5.
 - [x] **Passo 4** – tema chiaro/scuro che segue il sistema, animazioni, scelta del monitor (principale, N, cursore). 60 test pytest;
   animazioni verificate campionando opacità/posizione/altezza nel tempo. Monitor verificato solo con test unitari (qui c'è 1 solo schermo).
-- [ ] Passo 5 – pannello Impostazioni + wizard di primo avvio
+- [x] **Passo 5** – pannello Impostazioni (5 schede) + wizard di primo avvio (4 passi), entrambi costruiti dalle stesse sezioni.
+  77 test pytest + test dal vivo con tasti reali (26 controlli: wizard, cattura scorciatoia, conflitto, salvataggio).
 - [ ] Passo 6 – doppio tocco del tasto Windows (hook WH_KEYBOARD_LL)
 - [ ] Passo 7 – test pytest, README, pubblicazione su GitHub con release
 
@@ -67,6 +68,14 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
   quindi la hotkey la riapre subito.
 - **Monitor**: `monitor` = `primary` | `cursor` | `1`, `2`… (ordine di `QGuiApplication.screens()`, il principale è il primo; se lo
   schermo non esiste più si ricade sul principale). «Entrambi/tutti gli schermi» NON è implementato: servirebbero finestre clone.
+- **Impostazioni e wizard** (`settings.py`): `Section` (Attivazione, Aspetto, Ricerca, Browser, Avanzate) con `load(config)` /
+  `apply(config)` / `problem()`. Il pannello le mostra in schede e lavora su una *copia* della config; il wizard le mostra come
+  pagine (Avanzate escluso). Il risultato passa da `App.apply_settings()`: copia nella config viva, ri-registra la hotkey se è
+  cambiata (se fallisce rimette la precedente e avvisa, tenendo le altre modifiche), applica tema/monitor/animazioni, salva il JSON
+  e aggiorna l'avvio con Windows. «Salta» o chiudere il wizard segna `setup_done` senza cambiare nulla.
+- **Cattura della scorciatoia**: `HotkeyEdit` registra la prossima combinazione e, finché ha il focus, sospende la hotkey globale
+  (altrimenti Alt+Space aprirebbe il launcher invece di essere registrata). Funziona anche con Alt+Space; le combinazioni con il
+  tasto Windows non si possono catturare (le intercetta il sistema), ma si può comunque scriverle a mano nel JSON.
 - **Config**: JSON in `%APPDATA%\Spotlight\config.json`.
 - **Istanza unica**: la nuova istanza chiede alla vecchia di chiudersi (socket locale), poi parte; se la vecchia
   non risponde viene terminata.
