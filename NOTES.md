@@ -22,7 +22,16 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
   dopo il tocco, Win sinistro/destro), struct di SendInput, installazione/rimozione dell'hook reale.
   **Non verificato con tasti reali**: il test dal vivo (`live_test4`, che inietta tocchi di Win) è stato interrotto dall'utente.
   Verificato a mano soltanto che `Win → 0xFF → rilascio Win` non apre Start su questa macchina (apre `SearchHost.exe` solo senza maschera).
-- [ ] Passo 7 – test pytest, README, pubblicazione su GitHub con release
+- [x] **Passo 7** – README, LICENSE (MIT), pubblicazione su GitHub: repository pubblico `nickguti/everything-launcher`, release `v0.1.0`.
+  Login con `gh auth login --web` (nessun token in chiaro). Prima del push gli autori dei 26 commit sono stati riscritti con l'email
+  `noreply` di GitHub (`filter-branch`, poi eliminati `refs/original` e gli oggetti vecchi).
+
+## Da fare / da verificare
+
+- **Provare il doppio tocco con tasti veri** (il test dal vivo `live_test4` non è mai stato completato): doppio tocco apre la barra senza far
+  lampeggiare Start; tocco singolo apre Start con ~300 ms di ritardo; Win+R, Win+E restano normali; pressione lunga = Start subito.
+- Provare la scelta del monitor su una macchina con due schermi.
+- Valutare un eseguibile (PyInstaller) da allegare alle release.
 
 ## Decisioni
 
