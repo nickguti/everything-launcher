@@ -174,7 +174,7 @@ class Config:
                 log.exception("Cannot write the default config to %s", path)
             return cfg
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8-sig"))  # tolerate the BOM some editors add
             if not isinstance(data, dict):
                 raise ValueError("the top level must be a JSON object")
         except (OSError, ValueError) as exc:

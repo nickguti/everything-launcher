@@ -1,3 +1,4 @@
+import codecs
 import json
 
 from spotlight.config import DEFAULT_EXCLUDED_PATHS, Config
@@ -108,3 +109,11 @@ def test_double_tap_defaults_and_validation(tmp_path):
     loaded = Config.load(path)
     assert loaded.double_tap_ms == 150 and loaded.double_tap_win is True  # clamped / rejected
     assert "double_tap_win" in loaded.load_warning
+
+
+def test_a_utf8_bom_from_an_editor_is_accepted(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_bytes(codecs.BOM_UTF8 + json.dumps({"hotkey": "Ctrl+Space"}).encode("utf-8"))
+    cfg = Config.load(path)
+    assert cfg.hotkey == "Ctrl+Space" and cfg.load_warning == ""
+    assert not (tmp_path / "config.json.bad").exists()
