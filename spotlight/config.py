@@ -15,6 +15,7 @@ APP_DIR_NAME = "Spotlight"
 
 SORT_MODES = ("date_modified_desc", "name_asc", "path_asc", "size_desc")
 RESULT_FILTERS = ("all", "files", "folders")
+BROWSER_CHOICES = ("chrome", "edge", "firefox", "custom")
 
 # Substrings matched against the full path (Everything: !"<text>"). Keeps system noise,
 # caches and dependency folders out of date-sorted results.
@@ -86,6 +87,9 @@ _VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "result_filter": _one_of(RESULT_FILTERS),
     "excluded_paths": _text_list,
     "everything_path": _text,
+    "browser": _one_of(BROWSER_CHOICES),
+    "browser_path": _text,
+    "browser_profile": _text,
 }
 
 
@@ -98,6 +102,9 @@ class Config:
     result_filter: str = "all"
     excluded_paths: list[str] = field(default_factory=lambda: list(DEFAULT_EXCLUDED_PATHS))
     everything_path: str = ""  # optional override for Everything.exe
+    browser: str = "chrome"  # one of BROWSER_CHOICES
+    browser_path: str = ""  # explicit browser executable; required for "custom"
+    browser_profile: str = ""  # Chromium profile folder ("Default", "Profile 1"); empty = the first one
 
     # Set by load() when the file had problems; never written back.
     load_warning: str = field(default="", init=False, repr=False, compare=False, metadata={"persist": False})
