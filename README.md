@@ -48,8 +48,9 @@ python -m venv .venv
 .venv\Scripts\python main.py
 ```
 
-Al primo avvio si apre una breve configurazione guidata (attivazione, aspetto, ricerca, browser). Per avviarlo senza console usa
-`.venv\Scripts\pythonw.exe main.py`, oppure attiva «Avvia con Windows» dalla tray: scrive il comando in `HKCU\...\Run`.
+Al primo avvio si apre una breve configurazione guidata (attivazione, aspetto, ricerca, browser). Per avviarlo senza console fai
+doppio clic su **`Avvia Spotlight.bat`** (se manca l'ambiente virtuale lo crea e installa le dipendenze) oppure usa
+`.venv\Scripts\pythonw.exe main.py`. Attivando «Avvia con Windows» dalla tray il comando viene scritto in `HKCU\...\Run`.
 
 Se Everything non è in esecuzione il launcher lo avvia da solo in background (`-startup`, senza finestra). Il caricamento
 dell'indice può richiedere qualche secondo; nel frattempo la barra lo dice e la ricerca web resta disponibile.
