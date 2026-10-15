@@ -52,3 +52,35 @@ def test_unknown_keys_are_ignored(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"hotkey": "Alt+Space", "future_option": 1}), encoding="utf-8")
     assert Config.load(path) == Config()
+
+
+def test_new_appearance_options_have_sensible_defaults():
+    cfg = Config()
+    assert (cfg.theme, cfg.monitor, cfg.animations) == ("system", "primary", True)
+
+
+def test_monitor_accepts_primary_cursor_or_a_screen_number(tmp_path):
+    path = tmp_path / "config.json"
+    for value, expected in (("cursor", "cursor"), ("Primary", "primary"), (2, "2"), ("3", "3")):
+        path.write_text(json.dumps({"monitor": value}), encoding="utf-8")
+        cfg = Config.load(path)
+        assert cfg.monitor == expected and cfg.load_warning == ""
+
+
+def test_monitor_rejects_nonsense(tmp_path):
+    path = tmp_path / "config.json"
+    for value in ("both", 0, "-1", True, None):
+        path.write_text(json.dumps({"monitor": value}), encoding="utf-8")
+        cfg = Config.load(path)
+        assert cfg.monitor == "primary" and "monitor" in cfg.load_warning
+
+
+def test_theme_and_animations_are_validated(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"theme": "dark", "animations": False}), encoding="utf-8")
+    cfg = Config.load(path)
+    assert (cfg.theme, cfg.animations) == ("dark", False)
+    path.write_text(json.dumps({"theme": "pink", "animations": "yes"}), encoding="utf-8")
+    cfg = Config.load(path)
+    assert (cfg.theme, cfg.animations) == ("system", True)
+    assert "theme" in cfg.load_warning and "animations" in cfg.load_warning

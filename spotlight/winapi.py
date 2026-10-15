@@ -27,6 +27,18 @@ kernel32.GetCurrentThreadId.restype = wintypes.DWORD
 
 _KEYEVENTF_KEYUP = 0x0002
 _VK_UNASSIGNED = 0xFF
+_SPI_GETCLIENTAREAANIMATION = 0x1042
+
+user32.SystemParametersInfoW.argtypes = [wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT]
+user32.SystemParametersInfoW.restype = wintypes.BOOL
+
+
+def animations_enabled() -> bool:
+    """Windows' "Animation effects" setting (Settings > Accessibility > Visual effects)."""
+    flag = wintypes.BOOL(True)
+    if user32.SystemParametersInfoW(_SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(flag), 0):
+        return bool(flag.value)
+    return True
 
 
 def force_foreground(hwnd: int) -> bool:

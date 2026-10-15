@@ -16,6 +16,7 @@ APP_DIR_NAME = "Spotlight"
 SORT_MODES = ("date_modified_desc", "name_asc", "path_asc", "size_desc")
 RESULT_FILTERS = ("all", "files", "folders")
 BROWSER_CHOICES = ("chrome", "edge", "firefox", "custom")
+THEME_CHOICES = ("system", "light", "dark")
 
 # Substrings matched against the full path (Everything: !"<text>"). Keeps system noise,
 # caches and dependency folders out of date-sorted results.
@@ -73,6 +74,20 @@ def _text(value: Any) -> str:
     return value.strip()
 
 
+def _boolean(value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError("expected true or false")
+    return value
+
+
+def _monitor(value: Any) -> str:
+    """"primary", "cursor" (the screen under the mouse) or a 1-based screen number."""
+    text = str(value).strip().lower() if isinstance(value, (str, int)) and not isinstance(value, bool) else ""
+    if text in ("primary", "cursor") or (text.isdigit() and int(text) >= 1):
+        return text
+    raise ValueError("expected primary, cursor or a screen number")
+
+
 def _text_list(value: Any) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         raise ValueError("expected a list of strings")
@@ -90,6 +105,9 @@ _VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "browser": _one_of(BROWSER_CHOICES),
     "browser_path": _text,
     "browser_profile": _text,
+    "theme": _one_of(THEME_CHOICES),
+    "monitor": _monitor,
+    "animations": _boolean,
 }
 
 
@@ -105,6 +123,9 @@ class Config:
     browser: str = "chrome"  # one of BROWSER_CHOICES
     browser_path: str = ""  # explicit browser executable; required for "custom"
     browser_profile: str = ""  # Chromium profile folder ("Default", "Profile 1"); empty = the first one
+    theme: str = "system"  # one of THEME_CHOICES
+    monitor: str = "primary"  # "primary", "cursor" or a 1-based screen number
+    animations: bool = True  # also off when Windows' own animation effects are off
 
     # Set by load() when the file had problems; never written back.
     load_warning: str = field(default="", init=False, repr=False, compare=False, metadata={"persist": False})
