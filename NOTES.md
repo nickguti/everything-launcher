@@ -6,7 +6,8 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
 ## Stato
 
 - [x] **Passo 0** – setup: Python 3.12 (winget, per utente), venv `.venv`, PyQt6, SDK Everything + `es.exe` in `vendor/`, repo git.
-- [ ] Passo 1 – MVP minimo: config, ricerca Everything, finestra, hotkey Alt+Space
+- [x] **Passo 1** – MVP minimo: config, ricerca Everything (SDK + fallback es.exe), finestra, hotkey Alt+Space.
+  Testato con tasti reali iniettati (hotkey, focus in primo piano, digitazione, frecce, Esc, toggle, chiusura per perdita di focus) e 23 test pytest.
 - [ ] Passo 2 – browser (Chrome + profili) e ricerca Google / prefisso `g`
 - [ ] Passo 3 – tray, istanza unica (la nuova sostituisce la vecchia), avvio con Windows
 - [ ] Passo 4 – tema chiaro/scuro di sistema, animazioni, scelta del monitor
@@ -25,6 +26,16 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
   alternativi nelle impostazioni.
 - **Browser**: default Chrome (richiesta esplicita, il browser di sistema è Edge); profilo scelto dall'utente
   (default il primo); link aperto come nuova scheda nella finestra esistente; se non parte → errore visibile.
+  **Scoperta importante**: sulla macchina Everything gira solo come *servizio* (sessione 0). L'IPC (SDK ed `es.exe`)
+  risponde solo se c'è anche il processo client nella sessione utente, quindi il launcher lo avvia da solo con
+  `Everything.exe -first-instance -startup` (nessuna finestra; l'icona tray dipende dalle opzioni di Everything).
+  Dopo l'avvio il database (~825k voci) impiega ~17 s a caricarsi: il launcher fa un *warm-up* all'avvio e, se si
+  cerca prima che sia pronto, mostra «Everything si sta avviando…». A regime ogni query costa 20–100 ms.
+- **Esclusioni di percorso**: `!"*<testo>*"` nella query SDK (la forma con `\"` finale veniva mal interpretata da es.exe).
+  `es.exe` ignora del tutto i termini negati, quindi nel fallback le esclusioni si applicano lato client su un campione
+  8× più grande. `es.exe` inoltre si rompe se un singolo argomento contiene spazi: la query va passata una parola per argomento.
+- **Esclusioni di default**: ampie (`AppData\Local`, `ProgramData`, `Windows`, `.git`, `node_modules`, cache dei browser…)
+  perché con l'ordine per data i file di sistema/cache dominerebbero i risultati. Modificabili dalle impostazioni.
 - **Config**: JSON in `%APPDATA%\Spotlight\config.json`.
 - **Istanza unica**: la nuova istanza chiede alla vecchia di chiudersi (socket locale), poi parte; se la vecchia
   non risponde viene terminata.
