@@ -17,7 +17,8 @@ from .hotkey import HotkeyError, HotkeyManager
 from .instance import SingleInstance
 from .search import EverythingSearch, SearchRequest, SearchResult, SearchWorker
 from .tray import Tray, app_icon
-from .ui import Entry, LauncherWindow
+from .ui import Entry, LauncherWindow, Motion
+from .winapi import animations_enabled
 
 log = logging.getLogger("spotlight")
 
@@ -79,6 +80,7 @@ class Launcher(QObject):
         self.worker.engine_status.connect(self._on_engine_status)
 
         self.window = LauncherWindow()
+        self.apply_config()
         self.window.query_changed.connect(self._on_query_changed)
         self.window.submitted.connect(self._on_submitted)
         self.window.entry_activated.connect(self._activate)
@@ -98,8 +100,14 @@ class Launcher(QObject):
     def shutdown(self) -> None:
         self.worker.stop()
 
+    def apply_config(self) -> None:
+        """Push the appearance settings to the window (called again when settings change)."""
+        Motion.enabled = self.config.animations and animations_enabled()
+        self.window.monitor_mode = self.config.monitor
+        self.window.set_theme_mode(self.config.theme)
+
     def toggle(self) -> None:
-        if self.window.isVisible():
+        if self.window.is_open:
             self.window.hide_launcher()
         else:
             self.show()
@@ -138,7 +146,7 @@ class Launcher(QObject):
 
     def _on_engine_status(self, message: str) -> None:
         self._engine_status = message
-        if message and self._searching:
+        if message and self._searching and self.window.is_open:
             self._show_engine_status()
 
     def _show_engine_status(self) -> None:
