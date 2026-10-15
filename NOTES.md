@@ -8,7 +8,8 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
 - [x] **Passo 0** – setup: Python 3.12 (winget, per utente), venv `.venv`, PyQt6, SDK Everything + `es.exe` in `vendor/`, repo git.
 - [x] **Passo 1** – MVP minimo: config, ricerca Everything (SDK + fallback es.exe), finestra, hotkey Alt+Space.
   Testato con tasti reali iniettati (hotkey, focus in primo piano, digitazione, frecce, Esc, toggle, chiusura per perdita di focus) e 23 test pytest.
-- [ ] Passo 2 – browser (Chrome + profili) e ricerca Google / prefisso `g`
+- [x] **Passo 2** – browser (Chrome + profili) e ricerca Google / prefisso `g`. Verificato aprendo una vera scheda in Chrome
+  (profilo `Default`) e con test dal vivo (riga Google sempre ultima, prefisso, Invio veloce, errore del browser); 41 test pytest.
 - [ ] Passo 3 – tray, istanza unica (la nuova sostituisce la vecchia), avvio con Windows
 - [ ] Passo 4 – tema chiaro/scuro di sistema, animazioni, scelta del monitor
 - [ ] Passo 5 – pannello Impostazioni + wizard di primo avvio
@@ -36,6 +37,15 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
   8× più grande. `es.exe` inoltre si rompe se un singolo argomento contiene spazi: la query va passata una parola per argomento.
 - **Esclusioni di default**: ampie (`AppData\Local`, `ProgramData`, `Windows`, `.git`, `node_modules`, cache dei browser…)
   perché con l'ordine per data i file di sistema/cache dominerebbero i risultati. Modificabili dalle impostazioni.
+  Chrome si trova da App Paths (HKLM/HKCU, vista 64 e 32 bit) e poi dai percorsi standard; Edge su questa macchina sta in
+  `Program Files (x86)\Microsoft\EdgeCore\<versione>\msedge.exe` (nessun App Paths), scelta la versione più recente.
+  I profili Chromium si leggono da `User Data\Local State` (`profiles_order`); profilo vuoto = il primo. Si lancia
+  `chrome.exe --profile-directory=<dir> <url>`, che apre una nuova scheda nella finestra già aperta. Se il browser esce subito
+  con codice ≠ 0, non parte o non si trova, la barra mostra l'errore e resta aperta; non si ripiega mai sul browser di sistema.
+- **Riga Google**: sempre l'ultima, anche con 0 file trovati (i file sono al massimo `max_results`, quindi fino a 9 righe).
+  I motori a prefisso stanno in `browser.WEB_SEARCHES`: aggiungere `yt`, `gh`, `maps` = aggiungere una voce.
+- **Invio durante la ricerca**: se si preme Invio prima che arrivino i risultati nuovi, l'azione viene rimandata ai risultati freschi
+  invece di agire sulla lista vecchia.
 - **Config**: JSON in `%APPDATA%\Spotlight\config.json`.
 - **Istanza unica**: la nuova istanza chiede alla vecchia di chiudersi (socket locale), poi parte; se la vecchia
   non risponde viene terminata.
