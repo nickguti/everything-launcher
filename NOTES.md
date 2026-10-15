@@ -13,7 +13,8 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
 - [x] **Passo 3** – tray (Apri, Impostazioni, Avvia con Windows, Riavvia, Esci), istanza unica con sostituzione, avvio con Windows.
   Verificato con processi reali (`pythonw main.py` due volte e «Riavvia»: resta una sola istanza, quella nuova); 48 test pytest.
   «Impostazioni» per ora apre il JSON nell'editor predefinito, il pannello arriva al passo 5.
-- [ ] Passo 4 – tema chiaro/scuro di sistema, animazioni, scelta del monitor
+- [x] **Passo 4** – tema chiaro/scuro che segue il sistema, animazioni, scelta del monitor (principale, N, cursore). 60 test pytest;
+  animazioni verificate campionando opacità/posizione/altezza nel tempo. Monitor verificato solo con test unitari (qui c'è 1 solo schermo).
 - [ ] Passo 5 – pannello Impostazioni + wizard di primo avvio
 - [ ] Passo 6 – doppio tocco del tasto Windows (hook WH_KEYBOARD_LL)
 - [ ] Passo 7 – test pytest, README, pubblicazione su GitHub con release
@@ -57,6 +58,15 @@ Convenzioni: codice, commenti e commit in inglese; interfaccia in italiano.
 - **Avvio con Windows**: valore `Spotlight` in `HKCU\...\Run` = `"pythonw.exe" "main.py"` (senza console). All'avvio il comando
   viene riscritto se già attivo, così segue lo spostamento della cartella. Lo stato vero è il registro, non il JSON.
 - **Problemi all'avvio** (hotkey occupata, config rovinata) → notifica dalla tray (finestra di dialogo se la tray manca).
+- **Tema**: `theme` = `system` (default, segue `QStyleHints.colorScheme` e reagisce al cambio mentre il launcher è in esecuzione),
+  `light` o `dark`. L'evidenziazione della riga usa il colore d'accento di Windows (`QPalette.Accent`); il colore del testo sopra
+  l'accento si sceglie in base alla luminosità.
+- **Animazioni** (`ui.Motion`): comparsa con fade 140 ms + scivolamento di 12 px, chiusura con fade 100 ms, altezza della barra che si
+  adatta in 150 ms, evidenziazione che scorre tra le righe in 120 ms. Si spengono con `animations: false` oppure quando Windows ha
+  disattivato «Effetti di animazione». Durante la dissolvenza di chiusura la finestra è ancora visibile ma `is_open` è già falso,
+  quindi la hotkey la riapre subito.
+- **Monitor**: `monitor` = `primary` | `cursor` | `1`, `2`… (ordine di `QGuiApplication.screens()`, il principale è il primo; se lo
+  schermo non esiste più si ricade sul principale). «Entrambi/tutti gli schermi» NON è implementato: servirebbero finestre clone.
 - **Config**: JSON in `%APPDATA%\Spotlight\config.json`.
 - **Istanza unica**: la nuova istanza chiede alla vecchia di chiudersi (socket locale), poi parte; se la vecchia
   non risponde viene terminata.
